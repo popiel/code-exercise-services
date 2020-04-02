@@ -1,11 +1,10 @@
 package codesample
 
-import java.math.MathContext
-import scala.math.BigDecimal
+import scala.util.control.NoStackTrace
 
-/* I'm currently recording prices as an integer in hundredths of a penny.
- * If the desired precision might ever change, it may be better to use
- * BigDecimal so that the MathContext can be more conveniently adjusted.
+/* I'm currently recording prices as a long integer in hundredths of a penny.
+ * If the desired precision or scale might ever change, it may be better to
+ * use BigDecimal so that the MathContext can be more conveniently adjusted.
  */
 case class Price(baseInCentiCents: Long, count: Int) {
   require(count > 0)
@@ -13,7 +12,8 @@ case class Price(baseInCentiCents: Long, count: Int) {
   override def toString(): String = {
     (if (count == 1) "" else s"${count} for ") +
     (if (baseInCentiCents < 0) "-" else "") +
-    s"$$${baseInCentiCents.abs / 10000}.${(baseInCentiCents.abs % 10000 + 49) / 100}"
+    "$" + (baseInCentiCents.abs / 10000).toString +
+    "." + ((baseInCentiCents.abs % 10000 + 49) / 100).formatted("%02d")
   }
 
   /** Human-readable price for group lot */
@@ -21,7 +21,7 @@ case class Price(baseInCentiCents: Long, count: Int) {
 
   /** Price per single item, rounded half-down,
    * still in hundredths of a penny. */
-  def calculator = (baseInCentiCents + ((count - 1) / 2) / count)
+  def calculator = (baseInCentiCents + ((count - 1) / 2)) / count
 }
 
 case class ProductRecord(
@@ -38,7 +38,13 @@ case class ProductRecord(
   def isTaxable = flags(4)
 
   // The following are all just convenience functions for accessing derivitaves of other fields
-  def taxRate = if (isTaxable) BigDecimal("0.07775") else BigDecimal("0")
+  def taxRate = {
+    // The spec doesn't say anything about how the tax rate is actually used,
+    // so I'm just noting it as a BigDecimal since it will likely be applied
+    // against currencies.
+    import scala.math.BigDecimal
+    if (isTaxable) BigDecimal("0.07775") else BigDecimal("0")
+  }
   def unitOfMeasure = if (isPerWeight) "Pound" else "Each"
   def regularDisplayPrice = regularPrice.display
   def regularCalculatorPrice = regularPrice.calculator
@@ -50,23 +56,22 @@ case class ProductRecord(
  * Individual formats should be subclasses of this abstract class,
  * implementing the parseRecord method.
  */
-
 abstract trait LineBasedDeserializer[T] {
   def parseRecord(data: String): T
 
-  def parseRecordIterator(data: Iterator[String]): Iterator[T] =
+  def parseRecordIterator(data: Iterator[String], sourceName: String = ""): Iterator[T] =
     data.zipWithIndex.map{ case (line, lineNumber) => try {
       parseRecord(line)
     } catch {
       case e: IllegalArgumentException =>
-        throw new IllegalArgumentException(s"line $lineNumber: ${e.getMessage}", e)
+        throw new IllegalArgumentException(s"$sourceName${lineNumber + 1}: ${e.getMessage}", e) with NoStackTrace
     }}
 
-  def parseFile(source: scala.io.Source): Iterator[T] =
-    parseRecordIterator(source.getLines)
+  def parseSource(source: scala.io.Source, sourceName: String = ""): Iterator[T] =
+    parseRecordIterator(source.getLines, sourceName)
 
   def parseFile(filename: String): Iterator[T] =
-    parseFile(scala.io.Source.fromFile(filename))
+    parseSource(scala.io.Source.fromFile(filename), filename+":")
 }
 
 class ProductRecordDeserializer extends LineBasedDeserializer[ProductRecord] {
@@ -90,12 +95,12 @@ class ProductRecordDeserializer extends LineBasedDeserializer[ProductRecord] {
     def price(start: Int, name: String): Option[Price] = {
       val single = number(start, start + 8, s"$name Singular Price")
       val split = number(start + 18, start + 26, s"$name Split Price")
-      val forX = number(start + 36, start + 42, s"$name Split Price")
+      val forX = number(start + 36, start + 44, s"$name For X")
 
       if (single == 0 && split == 0) None
       else Some {
-        require(single == 0 || split == 0, "Only one of $name Singular Price or $name Split Price may be specified")
-        require(split == 0 || forX > 0, "$name For X must be greater than 0 when specifying $name Split Price")
+        require(single == 0 || split == 0, s"Only one of $name Singular Price or $name Split Price may be specified")
+        require(split == 0 || forX > 0, s"$name For X must be greater than 0 when specifying $name Split Price")
 
         if (single == 0) Price(split.toLong * 100, forX) else Price(single.toLong * 100, 1)
       }
@@ -120,3 +125,6 @@ class ProductRecordDeserializer extends LineBasedDeserializer[ProductRecord] {
     ProductRecord(id, description, regularPrice.get, promotionalPrice, flags, size)
   }
 }
+
+// Convenient singleton
+object ProductRecordDeserializer extends ProductRecordDeserializer
