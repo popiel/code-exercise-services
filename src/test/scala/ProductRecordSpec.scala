@@ -14,6 +14,7 @@ class ProductRecordSpec extends AnyFunSpec with Matchers {
         Price(56780, 2).display shouldBe "2 for $5.68"
       }
     }
+
     describe("calculator value") {
       it("should round to nearest hundredth of a penny") {
         Price((54321 * 3) + 0, 3).calculator shouldBe 54321
@@ -42,4 +43,40 @@ class ProductRecordSpec extends AnyFunSpec with Matchers {
       cups.unitOfMeasure shouldBe "Each"
     }
   }
+
+  describe("ProductRecordDeserializer") {
+    it("should parse a non-taxable item with no promo price") {
+      val parsed = ProductRecordDeserializer.parseRecord("80000001 Kimchi-flavored white rice                                  00000567 00000000 00000000 00000000 00000000 00000000 NNNNNNNNN      18oz")
+      parsed shouldBe ProductRecord(80000001, "Kimchi-flavored white rice", Price(56700, 1), None, Seq(false, false, false, false, false, false, false, false, false), "18oz")
+      parsed.isTaxable shouldBe false
+    }
+
+    it("should parse a taxable item with promo price") {
+      val parsed = ProductRecordDeserializer.parseRecord("14963801 Generic Soda 12-pack                                        00000000 00000549 00001300 00000000 00000002 00000000 NNNNYNNNN   12x12oz")
+      parsed shouldBe ProductRecord(14963801, "Generic Soda 12-pack", Price(130000, 2), Some(Price(54900, 1)), Seq(false, false, false, false, true, false, false, false, false), "12x12oz")
+      parsed.isTaxable shouldBe true
+    }
+
+    it("should complain if the input isn't long enough") {
+      val thrown = the [IllegalArgumentException] thrownBy {
+        ProductRecordDeserializer.parseRecord("")
+      } 
+      thrown.getMessage should include ("Input line too short")
+    }
+
+    it("should complain if it cannot parse a number") {
+      val thrown = the [IllegalArgumentException] thrownBy {
+        ProductRecordDeserializer.parseRecord("1x2d34cc Generic Soda 12-pack                                        00000700 00000549 00001300 00000000 00000002 00000000 NNNNYNNNN   12x12oz")
+      } 
+      thrown.getMessage should include ("Couldn't parse number for Product Id from '1x2d34cc'")
+    }
+
+    it("should complain if both singular and split prices are given") {
+      val thrown = the [IllegalArgumentException] thrownBy {
+        ProductRecordDeserializer.parseRecord("14963801 Generic Soda 12-pack                                        00000700 00000549 00001300 00000000 00000002 00000000 NNNNYNNNN   12x12oz")
+      } 
+      thrown.getMessage should include ("Only one of Regular Singular Price or Regular Split Price may be specified")
+    }
+  }
 }
+
