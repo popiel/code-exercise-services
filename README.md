@@ -1,41 +1,28 @@
-# Swiftly Services Coding Exercise
+# Swiftly Services Coding Exercise, implemented by Alex Popiel
+
 
 ## Overview
 
-To introduce Swiftly to your coding style and technique, we'd like you to do a small coding exercise. This is not a coding test where we give you a score or run it through a suite of tests for correctness.
+This is an implementation of the ProductRecord coding exercise from Swiftly, completed as part of their inteview process.  The original repository that it is based upon is at https://github.com/Swiftly-Systems/code-exercise-services.
 
-Our hope is that we can use this to seed a discussion that provides us with an understanding of your design and coding abilities and you with an idea of what working at Swiftly will be like. We believe this better reflects what engineers do than coding common patterns on a white board does.
+Of particular note, this exercise includes structures representing currencies; following standard practice, all math with currencies are done as INTEGERS to avoid round-off errors due to decimal/binary conversions of fractions.  I contemplated using the Scala standard library BigDecimal type for them instead, but that type is designed for fixed precision, not fixed scale, and is thus a bit of a nuisance to use correctly for currencies.
 
-A link to the spec for what we'd like you to build is at the end of these instructions.
+This also includes some parsing/deserialization.  Normally, I would use a parser-generator for describing the format, but that was specifically forbidden in this exercise, so I do it manually with various string splitting and type conversion primitives.  This is certainly harder to extend in future, but the exercise spec also assert that the format will never change.  (Famous last words...)
 
-## What We're Looking For
+When parsing, I _always_ include some error checking... even when told I don't need to.  While building this code, said error checking found a case where I had mistyped one of the format offsets (easy enough to do with a manually created parser like this), so the effort of putting in the error checking paid off with significantly reduced bug-hunting time.
 
-Think of this as real code you would be checking in and shipping to production. Swiftly leverages all of the [SOLID](https://en.wikipedia.org/wiki/SOLID) principles to produce maintainable, testable designs and code. The team will review your code to discuss how comfortable they would be extending your code to support additional business requirements without introducing any regressions.
+## Running the code
 
-## Requirements
+This code can be run against any input file from within a clone of the repository via sbt, e.g.:
 
-* Use one of the following modern, statically typed languages: Java, C#, Kotlin, F#, Scala, Go, Swift, etc.
-* Do *not* use any file/string parsing libraries
-  * You may use native or third party basic string utility functions like trim, pad, format, etc.
-* Complete this project on your own
-* Use a GitHub repository for source control
-  * Email the link to the GitHub repository when you are finished
-  * The readme.md file should include (at a minimum)
-    * Instructions for running the project (you can create a simple executable wrapper around your library, for example)
-    * Link to the latest Continuous Integration build/release
-    * Any other information you would normally include when you author a readme
-  * This code is your intellectual property
-    * License it however you'd like (MIT, Apache or Public Domain are great choices)
-    * Ensure the license you choose allows Swiftly employees to read, build, and execute the code for free
-* Set up a continuous integration environment using a free, publicly accessible service
-    * We recommend AppVeyor (https://www.appveyor.com/) for a project of this size if you don't already have a favorite
-    * Configure the CI environment to build directly from your GitHub project when there's a commit to master
-    * Ensure that the GitHub readme file is automatically updated with the result of the CI build (AppVeyor has an easy badge that you can embed in your readme.md)
-* Email your Swiftly contact the link to the GitHub repository when you're ready to submit your project
+"""sbt "run input-sample.txt" """
 
-If you have any questions, don't hesitate to reach out to your Swiftly contact.
+This will read the input file and print the resulting ProductRecords (using the toString provided automatically by case classes, so not really machine-readable due to lack of string quoting).  However, that should be sufficient to see that it is actually building the data structures correctly.
 
-## Product Specification
+Unit tests can be run with:
 
-And without further ado, the product specification for the feature is [here](../master/ProductInformationIntegrationSpec.md).
+"""sbt test"""
 
+## Continuous Integration
+
+CI is at ... WIP
