@@ -1,9 +1,10 @@
 # Swiftly Services Coding Exercise, implemented by Alex Popiel
 
+Travis CI status: [![Build Status](https://travis-ci.com/popiel/code-exercise-services.svg?branch=master)](https://travis-ci.com/popiel/code-exercise-services)
 
 ## Overview
 
-This is an implementation of the ProductRecord coding exercise from Swiftly, completed as part of their inteview process.  The original repository that it is based upon is at https://github.com/Swiftly-Systems/code-exercise-services.
+This is an implementation in Scala of the ProductRecord coding exercise from Swiftly, completed as part of their inteview process.  The original repository that it is based upon is at https://github.com/Swiftly-Systems/code-exercise-services.
 
 Of particular note, this exercise includes structures representing currencies; following standard practice, all math with currencies are done as INTEGERS to avoid round-off errors due to decimal/binary conversions of fractions.  I contemplated using the Scala standard library BigDecimal type for them instead, but that type is designed for fixed precision, not fixed scale, and is thus a bit of a nuisance to use correctly for currencies.
 
@@ -25,4 +26,6 @@ Unit tests can be run with:
 
 ## Continuous Integration
 
-CI is at ... WIP
+Unfortunately, AppVeyor doesn't seem to support Scala, so I used Travis CI instead: https://travis-ci.com/github/popiel/code-exercise-services
+
+[![Build Status](https://travis-ci.com/popiel/code-exercise-services.svg?branch=master)](https://travis-ci.com/popiel/code-exercise-services)
