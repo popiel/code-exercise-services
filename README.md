@@ -16,13 +16,13 @@ When parsing, I _always_ include some error checking... even when told I don't n
 
 This code can be run against any input file from within a clone of the repository via sbt, e.g.:
 
-"""sbt "run input-sample.txt" """
+    sbt "run input-sample.txt"
 
 This will read the input file and print the resulting ProductRecords (using the toString provided automatically by case classes, so not really machine-readable due to lack of string quoting).  However, that should be sufficient to see that it is actually building the data structures correctly.
 
 Unit tests can be run with:
 
-"""sbt test"""
+    sbt test
 
 ## Continuous Integration
 
