@@ -1,55 +1,56 @@
-package codesample
-
-import scala.util.control.NoStackTrace
-
-/* I'm currently recording prices as a long integer in hundredths of a penny.
- * If the desired precision or scale might ever change, it may be better to
- * use BigDecimal so that the MathContext can be more conveniently adjusted.
- */
-case class Price(baseInCentiCents: Long, count: Int) {
-  require(count > 0)
-
-  override def toString(): String = {
-    (if (count == 1) "" else s"${count} for ") +
-    (if (baseInCentiCents < 0) "-" else "") +
-    "$" + (baseInCentiCents.abs / 10000).toString +
-    "." + ((baseInCentiCents.abs % 10000 + 49) / 100).formatted("%02d")
-  }
-
-  /** Human-readable price for group lot */
-  def display = toString
-
-  /** Price per single item, rounded half-down,
-   * still in hundredths of a penny. */
-  def calculator = (baseInCentiCents + ((count - 1) / 2)) / count
+package object codesample {
+  type ProductRecord = ProductModule.Record
 }
 
-case class ProductRecord(
-  id: Int,
-  description: String,
-  regularPrice: Price,
-  promotionalPrice: Option[Price],
-  flags: Seq[Boolean],
-  size: String
-) {
-  // These give semantic context to individual flags
-  def isAgeRestricted = flags(0) // inferred from sample data
-  def isPerWeight = flags(2)
-  def isTaxable = flags(4)
+package codesample {
 
-  // The following are all just convenience functions for accessing derivitaves of other fields
-  def taxRate = {
-    // The spec doesn't say anything about how the tax rate is actually used,
-    // so I'm just noting it as a BigDecimal since it will likely be applied
-    // against currencies.
-    import scala.math.BigDecimal
-    if (isTaxable) BigDecimal("0.07775") else BigDecimal("0")
+case class Field[+T](name: String) {
+  def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]): T =
+    record.rawValues(this).asInstanceOf[T]
+
+  final def apply(record: DataRecord)(implicit visited: Seq[Field[Any]] = Seq()): T = {
+    if (visited contains this)
+      throw new IllegalStateException(
+        s"Circular dependency chain while computing $name; visited " +
+        (visited :+ this).map(_.name).mkString(" -> "))
+    else
+      compute(record)(visited :+ this)
   }
-  def unitOfMeasure = if (isPerWeight) "Pound" else "Each"
-  def regularDisplayPrice = regularPrice.display
-  def regularCalculatorPrice = regularPrice.calculator
-  def promotionalDisplayPrice = promotionalPrice.map(_.display)
-  def promotionalCalculatorPrice = promotionalPrice.map(_.calculator)
+}
+
+trait DataRecord {
+  def rawValues: Map[Field[Any], Any]
+  def apply[T](field: Field[T])(implicit visited: Seq[Field[Any]] = Seq()): T =
+    field.apply(this)
+}
+
+trait RecordModule {
+  def recordName: String
+
+  // Support for meta-functions
+  lazy val allFields: Seq[Field[Any]] = {
+    this.getClass.getMethods.filter(f =>
+      classOf[Field[Any]].isAssignableFrom(f.getReturnType)
+    ).map(_.invoke(this).asInstanceOf[Field[Any]])
+  }
+  lazy val rawFields = allFields.filter(_.getClass == classOf[Field[Any]])
+  lazy val derivedFields = allFields.filterNot(rawFields contains _)
+
+  case class Record(rawValues: Map[Field[Any], Any]) extends DataRecord {
+    override def toString() = {
+      val nameWidth = allFields.map(_.name.length).max + 2
+
+      recordName + ":\n  Raw Fields:\n" +
+      rawFields.map(f =>
+        String.format(s"    %-${nameWidth}s%s%n", f.name + ":", f(this).toString)
+      ).mkString +
+      "  Derived Fields:\n" +
+      derivedFields.map(f =>
+        String.format(s"    %-${nameWidth}s%s%n", f.name + ":", f(this).toString)
+      ).mkString +
+      "\n"
+    }
+  }
 }
 
 /** Deserialize input into some record structure.
@@ -60,11 +61,12 @@ abstract trait LineBasedDeserializer[T] {
   def parseRecord(data: String): T
 
   def parseRecordIterator(data: Iterator[String], sourceName: String = ""): Iterator[T] =
-    data.zipWithIndex.map{ case (line, lineNumber) => try {
-      parseRecord(line)
+    data.zipWithIndex.flatMap{ case (line, lineNumber) => try {
+      Some(parseRecord(line))
     } catch {
       case e: IllegalArgumentException =>
-        throw new IllegalArgumentException(s"$sourceName${lineNumber + 1}: ${e.getMessage}", e) with NoStackTrace
+        println(s"$sourceName${lineNumber + 1}: ${e.getMessage}")
+        None
     }}
 
   def parseSource(source: scala.io.Source, sourceName: String = ""): Iterator[T] =
@@ -72,59 +74,124 @@ abstract trait LineBasedDeserializer[T] {
 
   def parseFile(filename: String): Iterator[T] =
     parseSource(scala.io.Source.fromFile(filename), filename+":")
-}
 
-class ProductRecordDeserializer extends LineBasedDeserializer[ProductRecord] {
-  // This has a bunch of format error checking in it
-  // despite the spec saying I didn't need to do it...
-  // I've just tripped over bad formatting too much in my life to ignore it.
-  // Plus, it's a good baseline to know that input data isn't completely bogus.
+  def parse[T](data: String, start: Int, end: Int, field: Field[T])(implicit converter: String => T): (Field[T], T) = {
+    field -> converter(data.substring(start, end))
+  }
 
-  def parseRecord(data: String): ProductRecord = {
-    require(data.length >= 142, "Input line too short")
-
-    def number(start: Int, end: Int, name: String) = {
-      try { data.substring(start, end).toInt }
-      catch {
-        case e: NumberFormatException =>
-          throw new IllegalArgumentException(
-            s"Couldn't parse number for $name from '${data.substring(start, end)}'", e)
-      }
-    }
-
-    def price(start: Int, name: String): Option[Price] = {
-      val single = number(start, start + 8, s"$name Singular Price")
-      val split = number(start + 18, start + 26, s"$name Split Price")
-      val forX = number(start + 36, start + 44, s"$name For X")
-
-      if (single == 0 && split == 0) None
-      else Some {
-        require(single == 0 || split == 0, s"Only one of $name Singular Price or $name Split Price may be specified")
-        require(split == 0 || forX > 0, s"$name For X must be greater than 0 when specifying $name Split Price")
-
-        if (single == 0) Price(split.toLong * 100, forX) else Price(single.toLong * 100, 1)
-      }
-    }
-
-    val id = number(0, 8, "Product Id")
-    val description = data.substring(9, 68).trim
-    val regularPrice = price(69, "Regular")
-    val promotionalPrice = price(78, "Promotional")
-    val size = data.substring(133, 142).trim
-    val flags = (for (pos <- 1 to 9) yield {
-      data.charAt(pos + 122) match {
-        case 'Y' => true
-        case 'N' => false
-        case other => throw new IllegalArgumentException(
-          s"Couldn't parse flag $pos from '$other'")
-      }
-    })
-
-    require(regularPrice.nonEmpty, "One of Regular Singluar Price or Regular Split Price must be specified")
-
-    ProductRecord(id, description, regularPrice.get, promotionalPrice, flags, size)
+  implicit def stringToInt(s: String) = s.toInt
+  implicit def stringToBooleans(s: String): Seq[Boolean] = s.toCharArray.collect {
+    case 'Y' => true
+    case 'N' => false
+    case other => throw new IllegalArgumentException(s"Couldn't parse '$other' as boolean")
   }
 }
 
-// Convenient singleton
-object ProductRecordDeserializer extends ProductRecordDeserializer
+object ProductModule extends RecordModule {
+  val recordName = "ProductRecord"
+
+  // Raw Fields
+  val productId                = Field[Int]   ("Product Id")
+  val productDescription       = Field[String]("Product Description")
+  val regularSingularPrice     = Field[Int]   ("Regular Singular Price")
+  val promotionalSingularPrice = Field[Int]   ("Promotional Singular Price")
+  val regularSplitPrice        = Field[Int]   ("Regular Split Price")
+  val promotionalSplitPrice    = Field[Int]   ("Promotional Split Price")
+  val regularForX              = Field[Int]   ("Regular For X")
+  val promotionalForX          = Field[Int]   ("Promotional For X")
+  val flags                    = Field[Seq[Boolean]]("Flags")
+  val productSize              = Field[String]("Product Size")
+
+  // Derived Fields
+  val regularDisplayPrice = new Field[String]("Regular Display Price") {
+    override def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]) =
+      displayPrice(record, regularSingularPrice, regularSplitPrice, regularForX)
+  }
+  val promotionalDisplayPrice = new Field[String]("Promotional Display Price") {
+    override def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]) =
+      displayPrice(record, promotionalSingularPrice, promotionalSplitPrice, promotionalForX)
+  }
+  /* I'm currently representing calculator prices as a long integer in
+   * hundredths of a penny.  If the desired precision or scale might ever
+   * change, it may be better to use BigDecimal so that the MathContext
+   * can be more conveniently adjusted.
+   */
+  val regularCalculatorPrice = new Field[Long]("Regular Calculator Price") {
+    override def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]) =
+      calculatorPrice(record, regularSingularPrice, regularSplitPrice, regularForX)
+  }
+  val promotionalCalculatorPrice = new Field[Long]("Promotional Calculator Price") {
+    override def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]) =
+      calculatorPrice(record, promotionalSingularPrice, promotionalSplitPrice, promotionalForX)
+  }
+  val unitOfMeasure = new Field[String]("Unit of Measure") {
+    override def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]) =
+      if (isPerWeight(record)) "Pound" else "Each"
+  }
+  val taxRate = new Field[BigDecimal]("Tax Rate") {
+    override def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]) =
+      if (isTaxable(record)) BigDecimal("7.775") else BigDecimal("0")
+  }
+
+  // These give semantic context to individual flags
+  val isAgeRestricted = new Field[Boolean]("Is Age Restricted") {
+    override def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]) =
+      flags(record).apply(0) // inferred from sample data
+  }
+  val isPerWeight = new Field[Boolean]("Is Per-Weight") {
+    override def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]) =
+      flags(record).apply(2)
+  }
+  val isTaxable = new Field[Boolean]("Is Taxable") {
+    override def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]) =
+      flags(record).apply(4)
+  }
+
+  // Support functions for prices
+  def priceFormat(cents: Int) =
+    s"${if (cents < 0) "-" else ""}$$${cents.abs / 100}.${(cents.abs % 100).formatted("%02d")}"
+  def displayPrice(record: DataRecord, singular: Field[Int], split: Field[Int], forX: Field[Int]) = {
+    if (singular(record) != 0)
+      priceFormat(singular(record))
+    else if (split(record) != 0)
+      s"${forX(record)} for ${priceFormat(split(record))}"
+    else
+      ""
+  }
+  /* I'm currently representing calculator prices as a long integer in
+   * hundredths of a penny.  If the desired precision or scale might ever
+   * change, it may be better to use BigDecimal so that the MathContext
+   * can be more conveniently adjusted.
+   */
+  def calculatorPrice(record: DataRecord, singular: Field[Int], split: Field[Int], forX: Field[Int]) = {
+    if (singular(record) != 0)
+      singular(record) * 100L
+    else if (split(record) != 0) {
+      val count = forX(record)
+      // This implements half-down rounding
+      (split(record) * 100L + (count - 1) / 2) / count
+    } else {
+      0L
+    }
+  }
+}
+object ProductRecordDeserializer extends LineBasedDeserializer[ProductRecord] {
+  def parseRecord(data: String): ProductRecord = {
+    import ProductModule._
+
+    Record(Map(
+      parse(data,   0,   8, productId),
+      parse(data,   9,  68, productDescription)(_.trim),
+      parse(data,  69,  77, regularSingularPrice),
+      parse(data,  78,  86, promotionalSingularPrice),
+      parse(data,  87,  95, regularSplitPrice),
+      parse(data,  96, 104, promotionalSplitPrice),
+      parse(data, 105, 113, regularForX),
+      parse(data, 114, 122, promotionalForX),
+      parse(data, 123, 132, flags),
+      parse(data, 133, 142, productSize)(_.trim)
+    ))
+  }
+}
+
+}
