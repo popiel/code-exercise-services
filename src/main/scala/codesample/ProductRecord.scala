@@ -1,91 +1,4 @@
-package object codesample {
-  type ProductRecord = ProductModule.Record
-}
-
-package codesample {
-
-case class Field[+T](name: String) {
-  def compute(record: DataRecord)(implicit visited: Seq[Field[Any]]): T =
-    record.rawValues(this).asInstanceOf[T]
-
-  final def apply(record: DataRecord)(implicit visited: Seq[Field[Any]] = Seq()): T = {
-    if (visited contains this)
-      throw new IllegalStateException(
-        s"Circular dependency chain while computing $name; visited " +
-        (visited :+ this).map(_.name).mkString(" -> "))
-    else
-      compute(record)(visited :+ this)
-  }
-}
-
-trait DataRecord {
-  def rawValues: Map[Field[Any], Any]
-  def apply[T](field: Field[T])(implicit visited: Seq[Field[Any]] = Seq()): T =
-    field.apply(this)
-}
-
-trait RecordModule {
-  def recordName: String
-
-  // Support for meta-functions
-  lazy val allFields: Seq[Field[Any]] = {
-    this.getClass.getMethods.filter(f =>
-      classOf[Field[Any]].isAssignableFrom(f.getReturnType)
-    ).map(_.invoke(this).asInstanceOf[Field[Any]])
-  }
-  lazy val rawFields = allFields.filter(_.getClass == classOf[Field[Any]])
-  lazy val derivedFields = allFields.filterNot(rawFields contains _)
-
-  case class Record(rawValues: Map[Field[Any], Any]) extends DataRecord {
-    override def toString() = {
-      val nameWidth = allFields.map(_.name.length).max + 2
-
-      recordName + ":\n  Raw Fields:\n" +
-      rawFields.map(f =>
-        String.format(s"    %-${nameWidth}s%s%n", f.name + ":", f(this).toString)
-      ).mkString +
-      "  Derived Fields:\n" +
-      derivedFields.map(f =>
-        String.format(s"    %-${nameWidth}s%s%n", f.name + ":", f(this).toString)
-      ).mkString +
-      "\n"
-    }
-  }
-}
-
-/** Deserialize input into some record structure.
- * Individual formats should be subclasses of this abstract class,
- * implementing the parseRecord method.
- */
-abstract trait LineBasedDeserializer[T] {
-  def parseRecord(data: String): T
-
-  def parseRecordIterator(data: Iterator[String], sourceName: String = ""): Iterator[T] =
-    data.zipWithIndex.flatMap{ case (line, lineNumber) => try {
-      Some(parseRecord(line))
-    } catch {
-      case e: IllegalArgumentException =>
-        println(s"$sourceName${lineNumber + 1}: ${e.getMessage}")
-        None
-    }}
-
-  def parseSource(source: scala.io.Source, sourceName: String = ""): Iterator[T] =
-    parseRecordIterator(source.getLines, sourceName)
-
-  def parseFile(filename: String): Iterator[T] =
-    parseSource(scala.io.Source.fromFile(filename), filename+":")
-
-  def parse[T](data: String, start: Int, end: Int, field: Field[T])(implicit converter: String => T): (Field[T], T) = {
-    field -> converter(data.substring(start, end))
-  }
-
-  implicit def stringToInt(s: String) = s.toInt
-  implicit def stringToBooleans(s: String): Seq[Boolean] = s.toCharArray.collect {
-    case 'Y' => true
-    case 'N' => false
-    case other => throw new IllegalArgumentException(s"Couldn't parse '$other' as boolean")
-  }
-}
+package codesample
 
 object ProductModule extends RecordModule {
   val recordName = "ProductRecord"
@@ -192,6 +105,4 @@ object ProductRecordDeserializer extends LineBasedDeserializer[ProductRecord] {
       parse(data, 133, 142, productSize)(_.trim)
     ))
   }
-}
-
 }
