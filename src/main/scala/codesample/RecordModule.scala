@@ -108,6 +108,11 @@ trait LineBasedDeserializer[T] {
   def parseFile(filename: String): Iterator[T] =
     parseSource(scala.io.Source.fromFile(filename), filename+":")
 
+  /** Utility function for building the raw field value map.
+   * This generates a pair suitable for a map entry,
+   * based on a substring of the input data
+   * converted to the appropriate type for the field.
+   */
   def parse[V](data: String, start: Int, end: Int, field: Field[V])(implicit converter: String => V): (Field[V], V) = {
     field -> converter(data.substring(start, end))
   }
